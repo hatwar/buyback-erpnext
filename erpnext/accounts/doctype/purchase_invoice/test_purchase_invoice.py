@@ -10,6 +10,7 @@ from frappe.utils import cint
 import frappe.defaults
 from erpnext.stock.doctype.purchase_receipt.test_purchase_receipt import set_perpetual_inventory, \
 	test_records as pr_test_records
+from erpnext.exceptions import InvalidCurrency
 
 test_dependencies = ["Item", "Cost Center"]
 test_ignore = ["Serial No"]
@@ -218,7 +219,8 @@ class TestPurchaseInvoice(unittest.TestCase):
 		pi.load_from_db()
 
 		self.assertTrue(frappe.db.sql("""select name from `tabJournal Entry Account`
-			where reference_type='Purchase Invoice' and reference_name=%s and debit=300""", pi.name))
+			where reference_type='Purchase Invoice'
+			and reference_name=%s and debit_in_account_currency=300""", pi.name))
 
 		self.assertEqual(pi.outstanding_amount, 1212.30)
 
@@ -232,45 +234,24 @@ class TestPurchaseInvoice(unittest.TestCase):
 		test_recurring_document(self, test_records)
 
 	def test_total_purchase_cost_for_project(self):
-		purchase_invoice = frappe.new_doc('Purchase Invoice')
-		purchase_invoice.update({
-			"credit_to": "_Test Payable - _TC",
-			"supplier": "_Test Supplier",
-			"company": "_Test Company",
-			"items": [
-				{
-					"rate": 500,
-					"qty": 1,
-					"project_name": "_Test Project",
-					"item_code": "_Test Item Home Desktop 100",
-					"expense_account": "_Test Account Cost for Goods Sold - _TC",
-					"cost_center": "_Test Cost Center - _TC"
-				},
-				{
-					"rate": 1500,
-					"qty": 1,
-					"project_name": "_Test Project",
-					"item_code": "_Test Item Home Desktop 200",
-					"expense_account": "_Test Account Cost for Goods Sold - _TC",
-					"cost_center": "_Test Cost Center - _TC"
-				}
-			]
-		})
-		purchase_invoice.save()
-		purchase_invoice.submit()
-		self.assertEqual(frappe.db.get_value("Project", "_Test Project", "total_purchase_cost"), 2000)
+		existing_purchase_cost = frappe.db.sql("""select sum(ifnull(base_net_amount, 0))
+			from `tabPurchase Invoice Item` where project_name = '_Test Project' and docstatus=1""")
+		existing_purchase_cost = existing_purchase_cost and existing_purchase_cost[0][0] or 0
 
-		purchase_invoice1 = frappe.copy_doc(purchase_invoice)
-		purchase_invoice1.save()
-		purchase_invoice1.submit()
+		pi = make_purchase_invoice(currency="USD", conversion_rate=60, project_name="_Test Project")
+		self.assertEqual(frappe.db.get_value("Project", "_Test Project", "total_purchase_cost"),
+			existing_purchase_cost + 15000)
 
-		self.assertEqual(frappe.db.get_value("Project", "_Test Project", "total_purchase_cost"), 4000)
+		pi1 = make_purchase_invoice(qty=10, project_name="_Test Project")
+		self.assertEqual(frappe.db.get_value("Project", "_Test Project", "total_purchase_cost"),
+			existing_purchase_cost + 15500)
 
-		purchase_invoice1.cancel()
-		self.assertEqual(frappe.db.get_value("Project", "_Test Project", "total_purchase_cost"), 2000)
+		pi1.cancel()
+		self.assertEqual(frappe.db.get_value("Project", "_Test Project", "total_purchase_cost"),
+			existing_purchase_cost + 15000)
 
-		purchase_invoice.cancel()
-		self.assertEqual(frappe.db.get_value("Project", "_Test Project", "total_purchase_cost"), 0)
+		pi.cancel()
+		self.assertEqual(frappe.db.get_value("Project", "_Test Project", "total_purchase_cost"), existing_purchase_cost)
 
 	def test_return_purchase_invoice(self):
 		set_perpetual_inventory()
@@ -298,6 +279,55 @@ class TestPurchaseInvoice(unittest.TestCase):
 
 		set_perpetual_inventory(0)
 
+	def test_multi_currency_gle(self):
+		set_perpetual_inventory(0)
+
+		pi = make_purchase_invoice(supplier="_Test Supplier USD", credit_to="_Test Payable USD - _TC",
+			currency="USD", conversion_rate=50)
+
+		gl_entries = frappe.db.sql("""select account, account_currency, debit, credit,
+			debit_in_account_currency, credit_in_account_currency
+			from `tabGL Entry` where voucher_type='Purchase Invoice' and voucher_no=%s
+			order by account asc""", pi.name, as_dict=1)
+
+		self.assertTrue(gl_entries)
+
+		expected_values = {
+			"_Test Payable USD - _TC": {
+				"account_currency": "USD",
+				"debit": 0,
+				"debit_in_account_currency": 0,
+				"credit": 12500,
+				"credit_in_account_currency": 250
+			},
+			"_Test Account Cost for Goods Sold - _TC": {
+				"account_currency": "INR",
+				"debit": 12500,
+				"debit_in_account_currency": 12500,
+				"credit": 0,
+				"credit_in_account_currency": 0
+			}
+		}
+
+		for field in ("account_currency", "debit", "debit_in_account_currency", "credit", "credit_in_account_currency"):
+			for i, gle in enumerate(gl_entries):
+				self.assertEquals(expected_values[gle.account][field], gle[field])
+
+
+		# Check for valid currency
+		pi1 = make_purchase_invoice(supplier="_Test Supplier USD", credit_to="_Test Payable USD - _TC",
+			do_not_save=True)
+
+		self.assertRaises(InvalidCurrency, pi1.save)
+
+		# cancel
+		pi.cancel()
+
+		gle = frappe.db.sql("""select name from `tabGL Entry`
+			where voucher_type='Sales Invoice' and voucher_no=%s""", pi.name)
+
+		self.assertFalse(gle)
+
 def make_purchase_invoice(**args):
 	pi = frappe.new_doc("Purchase Invoice")
 	args = frappe._dict(args)
@@ -308,6 +338,7 @@ def make_purchase_invoice(**args):
 	pi.company = args.company or "_Test Company"
 	pi.supplier = args.supplier or "_Test Supplier"
 	pi.currency = args.currency or "INR"
+	pi.conversion_rate = args.conversion_rate or 1
 	pi.is_return = args.is_return
 	pi.return_against = args.return_against
 
@@ -318,7 +349,9 @@ def make_purchase_invoice(**args):
 		"rate": args.rate or 50,
 		"conversion_factor": 1.0,
 		"serial_no": args.serial_no,
-		"stock_uom": "_Test UOM"
+		"stock_uom": "_Test UOM",
+		"cost_center": "_Test Cost Center - _TC",
+		"project_name": args.project_name
 	})
 	if not args.do_not_save:
 		pi.insert()

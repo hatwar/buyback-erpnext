@@ -1,4 +1,6 @@
 from __future__ import unicode_literals
+from frappe import _
+
 app_name = "erpnext"
 app_title = "ERPNext"
 app_publisher = "Frappe Technologies Pvt. Ltd."
@@ -27,7 +29,7 @@ blogs.
 """
 app_icon = "icon-th"
 app_color = "#e74c3c"
-app_version = "5.6.4"
+app_version = "6.4.6"
 github_link = "https://github.com/frappe/erpnext"
 
 error_report_email = "support@erpnext.com"
@@ -51,7 +53,7 @@ my_account_context = "erpnext.shopping_cart.utils.update_my_account_context"
 
 email_append_to = ["Job Applicant", "Opportunity", "Issue"]
 
-calendars = ["Task", "Production Order", "Time Log", "Leave Application"]
+calendars = ["Task", "Production Order", "Time Log", "Leave Application", "Sales Order", "Holiday List"]
 
 website_generators = ["Item Group", "Item", "Sales Partner"]
 
@@ -62,11 +64,26 @@ website_context = {
 
 website_route_rules = [
 	{"from_route": "/orders", "to_route": "Sales Order"},
-	{"from_route": "/orders/<path:name>", "to_route": "print", "defaults": {"doctype": "Sales Order"}},
+	{"from_route": "/orders/<path:name>", "to_route": "order",
+		"defaults": {
+			"doctype": "Sales Order",
+			"parents": [{"title": _("Orders"), "name": "orders"}]
+		}
+	},
 	{"from_route": "/invoices", "to_route": "Sales Invoice"},
-	{"from_route": "/invoices/<path:name>", "to_route": "print", "defaults": {"doctype": "Sales Invoice"}},
+	{"from_route": "/invoices/<path:name>", "to_route": "order",
+		"defaults": {
+			"doctype": "Sales Invoice",
+			"parents": [{"title": _("Invoices"), "name": "invoices"}]
+		}
+	},
 	{"from_route": "/shipments", "to_route": "Delivery Note"},
-	{"from_route": "/shipments/<path:name>", "to_route": "print", "defaults": {"doctype": "Delivery Note"}}
+	{"from_route": "/shipments/<path:name>", "to_route": "order",
+		"defaults": {
+			"doctype": "Delivery Notes",
+			"parents": [{"title": _("Shipments"), "name": "shipments"}]
+		}
+	}
 ]
 
 has_website_permission = {
@@ -74,6 +91,16 @@ has_website_permission = {
 	"Sales Invoice": "erpnext.controllers.website_list_for_contact.has_website_permission",
 	"Delivery Note": "erpnext.controllers.website_list_for_contact.has_website_permission",
 	"Issue": "erpnext.support.doctype.issue.issue.has_website_permission"
+}
+
+permission_query_conditions = {
+	"Contact": "erpnext.utilities.address_and_contact.get_permission_query_conditions_for_contact",
+	"Address": "erpnext.utilities.address_and_contact.get_permission_query_conditions_for_address"
+}
+
+has_permission = {
+	"Contact": "erpnext.utilities.address_and_contact.has_permission",
+	"Address": "erpnext.utilities.address_and_contact.has_permission"
 }
 
 dump_report_map = "erpnext.startup.report_data_map.data_map"
@@ -111,16 +138,10 @@ scheduler_events = {
 		"erpnext.support.doctype.issue.issue.auto_close_tickets",
 		"erpnext.accounts.doctype.fiscal_year.fiscal_year.auto_create_fiscal_year",
 		"erpnext.hr.doctype.employee.employee.send_birthday_reminders"
-	],
-	"daily_long": [
-		"erpnext.setup.doctype.backup_manager.backup_manager.take_backups_daily"
-	],
-	"weekly_long": [
-		"erpnext.setup.doctype.backup_manager.backup_manager.take_backups_weekly"
 	]
 }
 
-default_mail_footer = """<div style="padding: 15px; text-align: center;">
+default_mail_footer = """<div style="text-align: center;">
 	<a href="https://erpnext.com?source=via_email_footer" target="_blank" style="color: #8d99a6;">
 		Sent via ERPNext
 	</a>

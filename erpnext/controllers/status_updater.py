@@ -30,7 +30,19 @@ status_map = {
 	],
 	"Sales Order": [
 		["Draft", None],
-		["Submitted", "eval:self.docstatus==1"],
+		["To Deliver and Bill", "eval:self.per_delivered < 100 and self.per_billed < 100 and self.docstatus == 1"],
+		["To Bill", "eval:self.per_delivered == 100 and self.per_billed < 100 and self.docstatus == 1"],
+		["To Deliver", "eval:self.per_delivered < 100 and self.per_billed == 100 and self.docstatus == 1"],
+		["Completed", "eval:self.per_delivered == 100 and self.per_billed == 100 and self.docstatus == 1"],
+		["Stopped", "eval:self.status=='Stopped'"],
+		["Cancelled", "eval:self.docstatus==2"],
+	],
+	"Purchase Order": [
+		["Draft", None],
+		["To Receive and Bill", "eval:self.per_received < 100 and self.per_billed < 100 and self.docstatus == 1"],
+		["To Bill", "eval:self.per_received == 100 and self.per_billed < 100 and self.docstatus == 1"],
+		["To Receive", "eval:self.per_received < 100 and self.per_billed == 100 and self.docstatus == 1"],
+		["Completed", "eval:self.per_received == 100 and self.per_billed == 100 and self.docstatus == 1"],
 		["Stopped", "eval:self.status=='Stopped'"],
 		["Cancelled", "eval:self.docstatus==2"],
 	],
@@ -90,6 +102,10 @@ class StatusUpdater(Document):
 		self.global_tolerance = None
 
 		for args in self.status_updater:
+			if "target_ref_field" not in args:
+				# if target_ref_field is not specified, the programmer does not want to validate qty / amount
+				continue
+
 			# get unique transactions to update
 			for d in self.get_all_children():
 				if d.doctype == args['source_dt'] and d.get(args["join_field"]):
@@ -140,8 +156,9 @@ class StatusUpdater(Document):
 				.format(_(item["target_ref_field"].title()), item["reduce_by"]))
 
 	def update_qty(self, change_modified=True):
-		"""
-			Updates qty at row level
+		"""Updates qty or amount at row level
+
+			:param change_modified: If true, updates `modified` and `modified_by` for target parent doc
 		"""
 		for args in self.status_updater:
 			# condition to include current record (if submit or no if cancel)
@@ -150,58 +167,76 @@ class StatusUpdater(Document):
 			else:
 				args['cond'] = ' and parent!="%s"' % self.name.replace('"', '\"')
 
-			args['modified_cond'] = ''
+			args['set_modified'] = ''
 			if change_modified:
-				args['modified_cond'] = ', modified = now()'
+				args['set_modified'] = ', modified = now(), modified_by = "{0}"'\
+					.format(frappe.db.escape(frappe.session.user))
 
-			# update quantities in child table
-			for d in self.get_all_children():
-				if d.doctype == args['source_dt']:
-					# updates qty in the child table
-					args['detail_id'] = d.get(args['join_field'])
+			self._update_children(args)
 
-					args['second_source_condition'] = ""
-					if args.get('second_source_dt') and args.get('second_source_field') \
-							and args.get('second_join_field'):
-						if not args.get("second_source_extra_cond"):
-							args["second_source_extra_cond"] = ""
+			if "percent_join_field" in args:
+				self._update_percent_field(args)
 
-						args['second_source_condition'] = """ + ifnull((select sum(%(second_source_field)s)
-							from `tab%(second_source_dt)s`
-							where `%(second_join_field)s`="%(detail_id)s"
-							and (`tab%(second_source_dt)s`.docstatus=1) %(second_source_extra_cond)s), 0) """ % args
+	def _update_children(self, args):
+		"""Update quantities or amount in child table"""
+		for d in self.get_all_children():
+			if d.doctype != args['source_dt']:
+				continue
 
-					if args['detail_id']:
-						if not args.get("extra_cond"): args["extra_cond"] = ""
+			# updates qty in the child table
+			args['detail_id'] = d.get(args['join_field'])
 
-						frappe.db.sql("""update `tab%(target_dt)s`
-							set %(target_field)s = (select sum(%(source_field)s)
-								from `tab%(source_dt)s` where `%(join_field)s`="%(detail_id)s"
-								and (docstatus=1 %(cond)s) %(extra_cond)s) %(second_source_condition)s
-							where name='%(detail_id)s'""" % args)
+			args['second_source_condition'] = ""
+			if args.get('second_source_dt') and args.get('second_source_field') \
+					and args.get('second_join_field'):
+				if not args.get("second_source_extra_cond"):
+					args["second_source_extra_cond"] = ""
 
-			# get unique transactions to update
-			for name in set([d.get(args['percent_join_field']) for d in self.get_all_children(args['source_dt'])]):
-				if name:
-					args['name'] = name
+				args['second_source_condition'] = """ + ifnull((select sum(%(second_source_field)s)
+					from `tab%(second_source_dt)s`
+					where `%(second_join_field)s`="%(detail_id)s"
+					and (`tab%(second_source_dt)s`.docstatus=1) %(second_source_extra_cond)s), 0) """ % args
 
-					# update percent complete in the parent table
-					if args.get('target_parent_field'):
-						frappe.db.sql("""update `tab%(target_parent_dt)s`
-							set %(target_parent_field)s = (select sum(if(%(target_ref_field)s >
-								ifnull(%(target_field)s, 0), %(target_field)s,
-								%(target_ref_field)s))/sum(%(target_ref_field)s)*100
-								from `tab%(target_dt)s` where parent="%(name)s") %(modified_cond)s
-							where name='%(name)s'""" % args)
+			if args['detail_id']:
+				if not args.get("extra_cond"): args["extra_cond"] = ""
 
-					# update field
-					if args.get('status_field'):
-						frappe.db.sql("""update `tab%(target_parent_dt)s`
-							set %(status_field)s = if(ifnull(%(target_parent_field)s,0)<0.001,
-								'Not %(keyword)s', if(%(target_parent_field)s>=99.99,
-								'Fully %(keyword)s', 'Partly %(keyword)s'))
-							where name='%(name)s'""" % args)
+				frappe.db.sql("""update `tab%(target_dt)s`
+					set %(target_field)s = (select sum(%(source_field)s)
+						from `tab%(source_dt)s` where `%(join_field)s`="%(detail_id)s"
+						and (docstatus=1 %(cond)s) %(extra_cond)s) %(second_source_condition)s
+					where name='%(detail_id)s'""" % args)
 
+	def _update_percent_field(self, args):
+		"""Update percent field in parent transaction"""
+		unique_transactions = set([d.get(args['percent_join_field']) for d in self.get_all_children(args['source_dt'])])
+
+		for name in unique_transactions:
+			if not name:
+				continue
+
+			args['name'] = name
+
+			# update percent complete in the parent table
+			if args.get('target_parent_field'):
+				frappe.db.sql("""update `tab%(target_parent_dt)s`
+					set %(target_parent_field)s = round((select sum(if(%(target_ref_field)s >
+						ifnull(%(target_field)s, 0), %(target_field)s,
+						%(target_ref_field)s))/sum(%(target_ref_field)s)*100
+						from `tab%(target_dt)s` where parent="%(name)s"), 2) %(set_modified)s
+					where name='%(name)s'""" % args)
+
+			# update field
+			if args.get('status_field'):
+				frappe.db.sql("""update `tab%(target_parent_dt)s`
+					set %(status_field)s = if(ifnull(%(target_parent_field)s,0)<0.001,
+						'Not %(keyword)s', if(%(target_parent_field)s>=99.99,
+						'Fully %(keyword)s', 'Partly %(keyword)s'))
+					where name='%(name)s'""" % args)
+
+			if args.get("set_modified"):
+				target = frappe.get_doc(args["target_parent_dt"], name)
+				target.set_status(update=True)
+				target.notify_update()
 
 	def update_billing_status_for_zero_amount_refdoc(self, ref_dt):
 		ref_fieldname = ref_dt.lower().replace(" ", "_")

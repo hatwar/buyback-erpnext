@@ -28,16 +28,18 @@ erpnext.accounts.SalesInvoiceController = erpnext.selling.SellingController.exte
 			}
 		}
 
-		// if document is POS then change default print format to "POS Invoice" if no default is specified
-		if(cur_frm.doc.is_pos && cur_frm.doc.docstatus===1 && cint(frappe.defaults.get_user_defaults("fs_pos_view"))===1
-			&& !locals.DocType[cur_frm.doctype].default_print_format) {
-			locals.DocType[cur_frm.doctype].default_print_format = "POS Invoice";
-			cur_frm.setup_print_layout();
-		}
+		erpnext.queries.setup_queries(this.frm, "Warehouse", function() {
+			return erpnext.queries.warehouse(me.frm.doc);
+		});
 	},
 
 	refresh: function(doc, dt, dn) {
 		this._super();
+
+		if(cur_frm.msgbox && cur_frm.msgbox.$wrapper.is(":visible")) {
+			// hide new msgbox
+			cur_frm.msgbox.hide();
+		}
 
 		cur_frm.dashboard.reset();
 
@@ -67,12 +69,30 @@ erpnext.accounts.SalesInvoiceController = erpnext.selling.SellingController.exte
 			if(doc.outstanding_amount!=0 && !cint(doc.is_return)) {
 				cur_frm.add_custom_button(__('Payment'), cur_frm.cscript.make_bank_entry).addClass("btn-primary");
 			}
+
 		}
 
 		// Show buttons only when pos view is active
 		if (cint(doc.docstatus==0) && cur_frm.page.current_view_name!=="pos" && !doc.is_return) {
 			cur_frm.cscript.sales_order_btn();
 			cur_frm.cscript.delivery_note_btn();
+		}
+
+		this.set_default_print_format();
+	},
+
+	set_default_print_format: function() {
+		// set default print format to POS type
+		if(cur_frm.doc.is_pos) {
+			if(cur_frm.pos_print_format) {
+				cur_frm.meta._default_print_format = cur_frm.meta.default_print_format;
+				cur_frm.meta.default_print_format = cur_frm.pos_print_format;
+			}
+		} else {
+			if(cur_frm.meta._default_print_format) {
+				cur_frm.meta.default_print_format = cur_frm.meta._default_print_format;
+				cur_frm.meta._default_print_format = null;
+			}
 		}
 	},
 
@@ -119,6 +139,7 @@ erpnext.accounts.SalesInvoiceController = erpnext.selling.SellingController.exte
 
 	is_pos: function(doc, dt, dn, callback_fn) {
 		cur_frm.cscript.hide_fields(this.frm.doc);
+		if(cur_frm.doc.__missing_values_set) return;
 		if(cint(this.frm.doc.is_pos)) {
 			if(!this.frm.doc.company) {
 				this.frm.set_value("is_pos", 0);
@@ -130,6 +151,10 @@ erpnext.accounts.SalesInvoiceController = erpnext.selling.SellingController.exte
 					method: "set_missing_values",
 					callback: function(r) {
 						if(!r.exc) {
+							if(r.message && r.message.print_format) {
+								cur_frm.pos_print_format = r.message.print_format;
+							}
+							cur_frm.doc.__missing_values_set = true;
 							me.frm.script_manager.trigger("update_stock");
 							frappe.model.set_default_values(me.frm.doc);
 							me.set_dynamic_labels();
@@ -158,6 +183,26 @@ erpnext.accounts.SalesInvoiceController = erpnext.selling.SellingController.exte
 		})
 	},
 
+	debit_to: function() {
+		var me = this;
+		if(this.frm.doc.debit_to) {
+			me.frm.call({
+				method: "frappe.client.get_value",
+				args: {
+					doctype: "Account",
+					fieldname: "account_currency",
+					filters: { name: me.frm.doc.debit_to },
+				},
+				callback: function(r, rt) {
+					if(r.message) {
+						me.frm.set_value("party_account_currency", r.message.account_currency);
+						me.set_dynamic_labels();
+					}
+				}
+			});
+		}
+	},
+
 	allocated_amount: function() {
 		this.calculate_total_advance();
 		this.frm.refresh_fields();
@@ -165,10 +210,10 @@ erpnext.accounts.SalesInvoiceController = erpnext.selling.SellingController.exte
 
 	write_off_outstanding_amount_automatically: function() {
 		if(cint(this.frm.doc.write_off_outstanding_amount_automatically)) {
-			frappe.model.round_floats_in(this.frm.doc, ["base_grand_total", "paid_amount"]);
+			frappe.model.round_floats_in(this.frm.doc, ["grand_total", "paid_amount"]);
 			// this will make outstanding amount 0
 			this.frm.set_value("write_off_amount",
-				flt(this.frm.doc.base_grand_total - this.frm.doc.paid_amount - this.frm.doc.total_advance, precision("write_off_amount"))
+				flt(this.frm.doc.grand_total - this.frm.doc.paid_amount - this.frm.doc.total_advance, precision("write_off_amount"))
 			);
 			this.frm.toggle_enable("write_off_amount", false);
 
@@ -181,10 +226,12 @@ erpnext.accounts.SalesInvoiceController = erpnext.selling.SellingController.exte
 	},
 
 	write_off_amount: function() {
+		this.set_in_company_currency(this.frm.doc, ["write_off_amount"]);
 		this.write_off_outstanding_amount_automatically();
 	},
 
 	paid_amount: function() {
+		this.set_in_company_currency(this.frm.doc, ["paid_amount"]);
 		this.write_off_outstanding_amount_automatically();
 	},
 
@@ -376,18 +423,33 @@ cur_frm.cscript.on_submit = function(doc, cdt, cdn) {
 		if(row.delivery_note) frappe.model.clear_doc("Delivery Note", row.delivery_note)
 	})
 
-	if(cint(frappe.boot.notification_settings.sales_invoice)) {
+	if(cur_frm.doc.is_pos) {
+		cur_frm.msgbox = frappe.msgprint('<a class="btn btn-primary" \
+			onclick="cur_frm.print_preview.printit(true)" style="margin-right: 5px;">Print</a>\
+			<a class="btn btn-default" href="#Form/Sales Invoice/New Sales Invoice">New</a>');
+
+	} else if(cint(frappe.boot.notification_settings.sales_invoice)) {
 		cur_frm.email_doc(frappe.boot.notification_settings.sales_invoice_message);
-	} else if(cur_frm.doc.is_pos) {
-		new_doc("Sales Invoice");
 	}
 }
 
 cur_frm.set_query("debit_to", function(doc) {
-	return{
-		filters: [
-			['Account', 'root_type', '=', 'Asset'],
-			['Account', 'account_type', '=', 'Receivable']
-		]
+	// filter on Account
+	if (doc.customer) {
+		return {
+			filters: {
+				'account_type': 'Receivable',
+				'is_group': 0,
+				'company': doc.company
+			}
+		}
+	} else {
+		return {
+			filters: {
+				'report_type': 'Balance Sheet',
+				'is_group': 0,
+				'company': doc.company
+			}
+		}
 	}
 });

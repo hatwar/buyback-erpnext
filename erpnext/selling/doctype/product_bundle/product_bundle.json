@@ -11,6 +11,8 @@
  "fields": [
   {
    "allow_on_submit": 0, 
+   "bold": 0, 
+   "collapsible": 0, 
    "fieldname": "basic_section", 
    "fieldtype": "Section Break", 
    "hidden": 0, 
@@ -30,6 +32,8 @@
   }, 
   {
    "allow_on_submit": 0, 
+   "bold": 0, 
+   "collapsible": 0, 
    "description": "", 
    "fieldname": "new_item_code", 
    "fieldtype": "Link", 
@@ -53,6 +57,8 @@
   }, 
   {
    "allow_on_submit": 0, 
+   "bold": 0, 
+   "collapsible": 0, 
    "description": "List items that form the package.", 
    "fieldname": "item_section", 
    "fieldtype": "Section Break", 
@@ -73,6 +79,8 @@
   }, 
   {
    "allow_on_submit": 0, 
+   "bold": 0, 
+   "collapsible": 0, 
    "fieldname": "items", 
    "fieldtype": "Table", 
    "hidden": 0, 
@@ -103,7 +111,7 @@
  "is_submittable": 0, 
  "issingle": 0, 
  "istable": 0, 
- "modified": "2015-08-03 11:23:26.263254", 
+ "modified": "2015-09-07 15:51:26", 
  "modified_by": "Administrator", 
  "module": "Selling", 
  "name": "Product Bundle", 
@@ -131,7 +139,7 @@
   }, 
   {
    "amend": 0, 
-   "apply_user_permissions": 1, 
+   "apply_user_permissions": 0, 
    "cancel": 0, 
    "create": 0, 
    "delete": 0, 
@@ -151,7 +159,7 @@
   }, 
   {
    "amend": 0, 
-   "apply_user_permissions": 1, 
+   "apply_user_permissions": 0, 
    "cancel": 0, 
    "create": 1, 
    "delete": 1, 

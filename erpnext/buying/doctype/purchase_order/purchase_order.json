@@ -2145,7 +2145,7 @@
  "is_submittable": 1, 
  "issingle": 0, 
  "istable": 0, 
- "modified": "2015-10-14 16:15:34.192954", 
+ "modified": "2015-10-16 18:36:44.067468", 
  "modified_by": "Administrator", 
  "module": "Buying", 
  "name": "Purchase Order", 
@@ -2314,7 +2314,7 @@
  ], 
  "read_only": 0, 
  "read_only_onload": 1, 
- "search_fields": "status, buy_back_requisition_ref, transaction_date, grand_total", 
+ "search_fields": "status, transaction_date, grand_total", 
  "sort_field": "modified", 
  "sort_order": "DESC", 
  "title_field": "title"

@@ -112,15 +112,6 @@ standard_queries = {
 }
 
 doc_events = {
-	"Buy Back Requisition": {
-		"on_submit": ["samsungapp.samsungapp.doctype.buy_back_requisition.buy_back_requisition.save","samsungapp.samsungapp.doctype.buy_back_requisition.buy_back_requisition.send_to_sms"]
-	},
-	"Redemption Form": {
-		"on_submit":["samsungapp.samsungapp.doctype.redemption_form.redemption_form.send_reedemed_email","samsungapp.samsungapp.doctype.redemption_form.redemption_form.send_redeemed_sms"]
-	},
-	"Purchase Receipt": {
-		"on_submit": "samsungapp.samsungapp.doctype.buy_back_requisition.custom_methods.generate_pin"
-	},
 	"Stock Entry": {
 		"on_submit": "erpnext.stock.doctype.material_request.material_request.update_completed_and_requested_qty",
 		"on_cancel": "erpnext.stock.doctype.material_request.material_request.update_completed_and_requested_qty"

@@ -10,7 +10,7 @@ from erpnext.accounts.utils import get_fiscal_year, validate_fiscal_year, get_ac
 from erpnext.utilities.transaction_base import TransactionBase
 from erpnext.controllers.recurring_document import convert_to_recurring, validate_recurring_document
 from erpnext.controllers.sales_and_purchase_return import validate_return
-from erpnext.accounts.party import get_party_account_currency, validate_party_gle_currency
+from erpnext.accounts.party import get_party_account_currency
 from erpnext.exceptions import CustomerFrozen, InvalidCurrency
 
 force_item_fields = ("item_group", "barcode", "brand", "stock_uom")
@@ -221,7 +221,7 @@ class AccountsController(TransactionBase):
 		if not account_currency:
 			account_currency = get_account_currency(gl_dict.account)
 
-		if self.doctype != "Journal Entry":
+		if self.doctype not in ["Journal Entry", "Period Closing Voucher"]:
 			self.validate_account_currency(gl_dict.account, account_currency)
 			self.set_balance_in_account_currency(gl_dict, account_currency)
 
@@ -434,6 +434,8 @@ class AccountsController(TransactionBase):
 
 					frappe.throw(_("Accounting Entry for {0}: {1} can only be made in currency: {2}")
 						.format(party_type, party, party_account_currency), InvalidCurrency)
+
+				# Note: not validating with gle account because we don't have the account at quotation / sales order level and we shouldn't stop someone from creating a sales invoice if sales order is already created
 
 @frappe.whitelist()
 def get_tax_rate(account_head):

@@ -4,7 +4,7 @@
 from __future__ import unicode_literals
 import frappe, json, copy
 
-from frappe.utils import cstr, flt, getdate
+from frappe.utils import cstr, flt, getdate, strip
 from frappe import _
 from frappe.utils.file_manager import save_file
 from frappe.translate import (set_default_language, get_dict,
@@ -23,12 +23,7 @@ def setup_account(args=None):
 		if frappe.db.sql("select name from tabCompany"):
 			frappe.throw(_("Setup Already Complete!!"))
 
-		if not args:
-			args = frappe.local.form_dict
-		if isinstance(args, basestring):
-			args = json.loads(args)
-
-		args = frappe._dict(args)
+		args = process_args(args)
 
 		if args.language and args.language != "english":
 			set_default_language(args.language)
@@ -108,6 +103,21 @@ def setup_account(args=None):
 		for hook in frappe.get_hooks("setup_wizard_success"):
 			frappe.get_attr(hook)(args)
 
+
+def process_args(args):
+	if not args:
+		args = frappe.local.form_dict
+	if isinstance(args, basestring):
+		args = json.loads(args)
+
+	args = frappe._dict(args)
+
+	# strip the whitespace
+	for key, value in args.items():
+		if isinstance(value, basestring):
+			args[key] = strip(value)
+
+	return args
 
 def update_user_name(args):
 	if args.get("email"):
@@ -364,6 +374,7 @@ def create_items(args):
 			is_sales_item = args.get("is_sales_item_" + str(i))
 			is_purchase_item = args.get("is_purchase_item_" + str(i))
 			is_stock_item = item_group!=_("Services")
+			is_pro_applicable = item_group!=_("Services")
 			default_warehouse = ""
 			if is_stock_item:
 				default_warehouse = frappe.db.get_value("Warehouse", filters={
@@ -381,6 +392,7 @@ def create_items(args):
 					"is_purchase_item": 1 if is_purchase_item else 0,
 					"show_in_website": 1,
 					"is_stock_item": is_stock_item and 1 or 0,
+					"is_pro_applicable": is_pro_applicable and 1 or 0,
 					"item_group": item_group,
 					"stock_uom": args.get("item_uom_" + str(i)),
 					"default_warehouse": default_warehouse

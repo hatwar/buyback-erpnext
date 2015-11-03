@@ -166,6 +166,7 @@ def item_query(doctype, txt, searchfield, start, page_len, filters):
 		from tabItem
 		where tabItem.docstatus < 2
 			and ifnull(tabItem.has_variants, 0)=0
+			and tabItem.disabled=0
 			and (tabItem.end_of_life > %(today)s or ifnull(tabItem.end_of_life, '0000-00-00')='0000-00-00')
 			and (tabItem.`{key}` LIKE %(txt)s
 				or tabItem.item_name LIKE %(txt)s
@@ -293,3 +294,27 @@ def get_account_list(doctype, txt, searchfield, start, page_len, filters):
 		fields = ["name", "parent_account"],
 		limit_start=start, limit_page_length=page_len, as_list=True)
 
+
+@frappe.whitelist()
+def get_income_account(doctype, txt, searchfield, start, page_len, filters):
+	from erpnext.controllers.queries import get_match_cond
+
+	# income account can be any Credit account,
+	# but can also be a Asset account with account_type='Income Account' in special circumstances.
+	# Hence the first condition is an "OR"
+	if not filters: filters = {}
+
+	condition = ""
+	if filters.get("company"):
+		condition += "and tabAccount.company = %(company)s"
+
+	return frappe.db.sql("""select tabAccount.name from `tabAccount`
+			where (tabAccount.report_type = "Profit and Loss"
+					or tabAccount.account_type in ("Income Account", "Temporary"))
+				and tabAccount.is_group=0
+				and tabAccount.`{key}` LIKE %(txt)s
+				{condition} {match_condition}"""
+			.format(condition=condition, match_condition=get_match_cond(doctype), key=searchfield), {
+				'txt': "%%%s%%" % frappe.db.escape(txt),
+				'company': filters.get("company", "")
+			})

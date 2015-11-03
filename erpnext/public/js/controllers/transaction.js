@@ -12,6 +12,12 @@ erpnext.TransactionController = erpnext.taxes_and_totals.extend({
 			var today = get_today(),
 				currency = frappe.defaults.get_user_default("currency");
 
+			$.each(["posting_date", "transaction_date"], function(i, fieldname) {
+				if (me.frm.fields_dict[fieldname] && !me.frm.doc[fieldname] && me.frm[fieldname]) {
+					me.frm.set_value(fieldname, me.frm[fieldname]);
+				}
+			});
+
 			$.each({
 				posting_date: today,
 				transaction_date: today,
@@ -70,10 +76,9 @@ erpnext.TransactionController = erpnext.taxes_and_totals.extend({
 		if(this.frm.doc.__islocal && !(this.frm.doc.taxes || []).length
 			&& !(this.frm.doc.__onload ? this.frm.doc.__onload.load_after_mapping : false)) {
 				this.apply_default_taxes();
-		}
-
-		if(this.frm.doc.__islocal && this.frm.doc.company && this.frm.doc["items"] && !this.frm.doc.is_pos) {
-			this.calculate_taxes_and_totals();
+		} else if(this.frm.doc.__islocal && this.frm.doc.company && this.frm.doc["items"] 
+			&& !this.frm.doc.is_pos) {
+				me.calculate_taxes_and_totals();
 		}
 		if(frappe.meta.get_docfield(this.frm.doc.doctype + " Item", "item_code")) {
 			cur_frm.get_field("items").grid.set_multiple_add("item_code", "qty");
@@ -96,7 +101,7 @@ erpnext.TransactionController = erpnext.taxes_and_totals.extend({
 			me.frm.doc.name);
 
 		if(taxes_and_charges_field) {
-			frappe.call({
+			return frappe.call({
 				method: "erpnext.controllers.accounts_controller.get_default_taxes_and_charges",
 				args: {
 					"master_doctype": taxes_and_charges_field.options
@@ -104,6 +109,7 @@ erpnext.TransactionController = erpnext.taxes_and_totals.extend({
 				callback: function(r) {
 					if(!r.exc) {
 						me.frm.set_value("taxes", r.message);
+						me.calculate_taxes_and_totals();
 					}
 				}
 			});
@@ -277,12 +283,18 @@ erpnext.TransactionController = erpnext.taxes_and_totals.extend({
 	},
 
 	transaction_date: function() {
+		if (this.frm.doc.transaction_date) {
+			this.frm.transaction_date = this.frm.doc.transaction_date;
+		}
+
 		erpnext.get_fiscal_year(this.frm.doc.company, this.frm.doc.transaction_date);
 	},
 
 	posting_date: function() {
 		var me = this;
 		if (this.frm.doc.posting_date) {
+			this.frm.posting_date = this.frm.doc.posting_date;
+
 			if ((this.frm.doc.doctype == "Sales Invoice" && this.frm.doc.customer) ||
 				(this.frm.doc.doctype == "Purchase Invoice" && this.frm.doc.supplier)) {
 				return frappe.call({
@@ -350,7 +362,7 @@ erpnext.TransactionController = erpnext.taxes_and_totals.extend({
 	},
 
 	get_exchange_rate: function(from_currency, to_currency, callback) {
-		frappe.call({
+		return frappe.call({
 			method: "erpnext.setup.utils.get_exchange_rate",
 			args: {
 				from_currency: from_currency,
@@ -429,7 +441,7 @@ erpnext.TransactionController = erpnext.taxes_and_totals.extend({
 		setup_field_label_map(["total", "net_total", "total_taxes_and_charges", "discount_amount",
 			"grand_total", "taxes_and_charges_added", "taxes_and_charges_deducted",
 			"rounded_total", "in_words", "paid_amount", "write_off_amount"], this.frm.doc.currency);
-			
+
 		setup_field_label_map(["outstanding_amount", "total_advance"], this.frm.doc.party_account_currency);
 
 		cur_frm.set_df_property("conversion_rate", "description", "1 " + this.frm.doc.currency
@@ -495,7 +507,8 @@ erpnext.TransactionController = erpnext.taxes_and_totals.extend({
 		}
 
 		if(this.frm.fields_dict["advances"]) {
-			setup_field_label_map(["advance_amount", "allocated_amount"], company_currency, "advances");
+			setup_field_label_map(["advance_amount", "allocated_amount"], 
+				this.frm.doc.party_account_currency, "advances");
 		}
 
 		// toggle columns

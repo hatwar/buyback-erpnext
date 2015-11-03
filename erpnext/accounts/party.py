@@ -201,11 +201,14 @@ def get_party_gle_currency(party_type, party, company):
 
 		return existing_gle_currency[0][0] if existing_gle_currency else None
 
-	return frappe.local_cache("party_gle_currency", (party_type, party, company), generator)
+	return frappe.local_cache("party_gle_currency", (party_type, party, company), generator,
+		regenerate_if_none=True)
 
-def validate_party_gle_currency(party_type, party, company):
+def validate_party_gle_currency(party_type, party, company, party_account_currency=None):
 	"""Validate party account currency with existing GL Entry's currency"""
-	party_account_currency = get_party_account_currency(party_type, party, company)
+	if not party_account_currency:
+		party_account_currency = get_party_account_currency(party_type, party, company)
+
 	existing_gle_currency = get_party_gle_currency(party_type, party, company)
 
 	if existing_gle_currency and party_account_currency != existing_gle_currency:
@@ -217,10 +220,16 @@ def validate_party_accounts(doc):
 
 	for account in doc.get("accounts"):
 		if account.company in companies:
-			frappe.throw(_("There can only be 1 Account per Company in {0} {1}").format(doc.doctype, doc.name),
-				DuplicatePartyAccountError)
+			frappe.throw(_("There can only be 1 Account per Company in {0} {1}")
+				.format(doc.doctype, doc.name), DuplicatePartyAccountError)
 		else:
 			companies.append(account.company)
+
+		party_account_currency = frappe.db.get_value("Account", account.account, "account_currency")
+		existing_gle_currency = get_party_gle_currency(doc.doctype, doc.name, account.company)
+
+		if existing_gle_currency and party_account_currency != existing_gle_currency:
+			frappe.throw(_("Accounting entries have already been made in currency {0} for company {1}. Please select a receivable or payable account with currency {0}.").format(existing_gle_currency, account.company))
 
 @frappe.whitelist()
 def get_due_date(posting_date, party_type, party, company):

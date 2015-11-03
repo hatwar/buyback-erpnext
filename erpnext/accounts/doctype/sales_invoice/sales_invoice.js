@@ -160,6 +160,9 @@ erpnext.accounts.SalesInvoiceController = erpnext.selling.SellingController.exte
 							me.set_dynamic_labels();
 							me.calculate_taxes_and_totals();
 							if(callback_fn) callback_fn();
+							frappe.after_ajax(function() {
+								cur_frm.doc.__missing_values_set = false;
+							})
 						}
 					}
 				});
@@ -376,7 +379,7 @@ cur_frm.fields_dict['project_name'].get_query = function(doc, cdt, cdn) {
 // --------------------------------
 cur_frm.set_query("income_account", "items", function(doc) {
 	return{
-		query: "erpnext.accounts.doctype.sales_invoice.sales_invoice.get_income_account",
+		query: "erpnext.controllers.queries.get_income_account",
 		filters: {'company': doc.company}
 	}
 });

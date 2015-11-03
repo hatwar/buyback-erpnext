@@ -498,14 +498,17 @@ def get_default_bank_cash_account(company, voucher_type, mode_of_payment=None):
 	if voucher_type=="Bank Entry":
 		account = frappe.db.get_value("Company", company, "default_bank_account")
 		if not account:
-			account = frappe.db.get_value("Account", {"company": company, "account_type": "Bank", "is_group": 0})
+			account = frappe.db.get_value("Account", 
+				{"company": company, "account_type": "Bank", "is_group": 0})
 	elif voucher_type=="Cash Entry":
 		account = frappe.db.get_value("Company", company, "default_cash_account")
 		if not account:
-			account = frappe.db.get_value("Account", {"company": company, "account_type": "Cash", "is_group": 0})
+			account = frappe.db.get_value("Account", 
+				{"company": company, "account_type": "Cash", "is_group": 0})
 
 	if account:
-		account_details = frappe.db.get_value("Account", account, ["account_currency", "account_type"], as_dict=1)
+		account_details = frappe.db.get_value("Account", account, 
+			["account_currency", "account_type"], as_dict=1)
 		return {
 			"account": account,
 			"balance": get_balance_on(account),
@@ -696,13 +699,15 @@ def get_payment_entry_from_purchase_order(purchase_order):
 
 def get_payment_entry(doc):
 	bank_account = get_default_bank_cash_account(doc.company, "Bank Entry")
+	cost_center = frappe.db.get_value("Company", doc.company, "cost_center")
 
 	jv = frappe.new_doc('Journal Entry')
 	jv.voucher_type = 'Bank Entry'
 	jv.company = doc.company
 	jv.fiscal_year = doc.fiscal_year
 
-	jv.append("accounts")
+	d1 = jv.append("accounts")
+	d1.cost_center = cost_center
 	d2 = jv.append("accounts")
 
 	if bank_account:
@@ -712,6 +717,7 @@ def get_payment_entry(doc):
 		d2.account_type = bank_account["account_type"]
 		d2.exchange_rate = get_exchange_rate(bank_account["account"],
 			bank_account["account_currency"], doc.company)
+		d2.cost_center = cost_center
 
 	return jv
 
@@ -814,11 +820,19 @@ def get_account_balance_and_party_type(account, date, company, debit=None, credi
 	return grid_values
 
 @frappe.whitelist()
-def get_exchange_rate(account, account_currency, company,
+def get_exchange_rate(account, account_currency=None, company=None,
 		reference_type=None, reference_name=None, debit=None, credit=None, exchange_rate=None):
 	from erpnext.setup.utils import get_exchange_rate
+	account_details = frappe.db.get_value("Account", account, 
+		["account_type", "root_type", "account_currency", "company"], as_dict=1)
+	
+	if not company:
+		company = account_details.company
+		
+	if not account_currency:
+		account_currency = account_details.account_currency
+		
 	company_currency = get_company_currency(company)
-	account_details = frappe.db.get_value("Account", account, ["account_type", "root_type"], as_dict=1)
 
 	if account_currency != company_currency:
 		if reference_type in ("Sales Invoice", "Purchase Invoice") and reference_name:

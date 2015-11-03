@@ -5,7 +5,7 @@ from __future__ import unicode_literals
 import frappe
 import frappe.defaults
 from frappe import _
-from frappe.utils import cstr, cint, flt, comma_or, getdate
+from frappe.utils import cstr, cint, flt, comma_or, getdate, nowdate
 from erpnext.stock.utils import get_incoming_rate
 from erpnext.stock.stock_ledger import get_previous_sle, NegativeStockError
 from erpnext.stock.get_item_details import get_available_qty, get_default_cost_center, get_conversion_factor
@@ -359,14 +359,17 @@ class StockEntry(StockController):
 
 	def update_stock_ledger(self):
 		sl_entries = []
+
+		# make sl entries for source warehouse first, then do for target warehouse
 		for d in self.get('items'):
-			if cstr(d.s_warehouse) and self.docstatus == 1:
+			if cstr(d.s_warehouse):
 				sl_entries.append(self.get_sl_entries(d, {
 					"warehouse": cstr(d.s_warehouse),
 					"actual_qty": -flt(d.transfer_qty),
 					"incoming_rate": 0
 				}))
 
+		for d in self.get('items'):
 			if cstr(d.t_warehouse):
 				sl_entries.append(self.get_sl_entries(d, {
 					"warehouse": cstr(d.t_warehouse),
@@ -374,15 +377,18 @@ class StockEntry(StockController):
 					"incoming_rate": flt(d.valuation_rate)
 				}))
 
-			# On cancellation, make stock ledger entry for
-			# target warehouse first, to update serial no values properly
+		# On cancellation, make stock ledger entry for
+		# target warehouse first, to update serial no values properly
 
-			if cstr(d.s_warehouse) and self.docstatus == 2:
-				sl_entries.append(self.get_sl_entries(d, {
-					"warehouse": cstr(d.s_warehouse),
-					"actual_qty": -flt(d.transfer_qty),
-					"incoming_rate": 0
-				}))
+			# if cstr(d.s_warehouse) and self.docstatus == 2:
+			# 	sl_entries.append(self.get_sl_entries(d, {
+			# 		"warehouse": cstr(d.s_warehouse),
+			# 		"actual_qty": -flt(d.transfer_qty),
+			# 		"incoming_rate": 0
+			# 	}))
+
+		if self.docstatus == 2:
+			sl_entries.reverse()
 
 		self.make_sl_entries(sl_entries, self.amended_from and 'Yes' or 'No')
 
@@ -432,8 +438,10 @@ class StockEntry(StockController):
 	def get_item_details(self, args=None, for_update=False):
 		item = frappe.db.sql("""select stock_uom, description, image, item_name,
 			expense_account, buying_cost_center, item_group from `tabItem`
-			where name = %s and (ifnull(end_of_life,'0000-00-00')='0000-00-00' or end_of_life > now())""",
-			(args.get('item_code')), as_dict = 1)
+			where name = %s
+				and disabled=0
+				and (end_of_life is null or end_of_life='0000-00-00' or end_of_life > %s)""",
+			(args.get('item_code'), nowdate()), as_dict = 1)
 		if not item:
 			frappe.throw(_("Item {0} is not active or end of life has been reached").format(args.get("item_code")))
 

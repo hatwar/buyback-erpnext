@@ -76,7 +76,7 @@ class PurchaseInvoice(BuyingController):
 	def get_advances(self):
 		if not self.is_return:
 			super(PurchaseInvoice, self).get_advances(self.credit_to, "Supplier", self.supplier,
-				"Purchase Invoice Advance", "advances", "debit", "purchase_order")
+				"Purchase Invoice Advance", "advances", "debit_in_account_currency", "purchase_order")
 
 	def check_active_purchase_items(self):
 		for d in self.get('items'):
@@ -317,23 +317,22 @@ class PurchaseInvoice(BuyingController):
 			if auto_accounting_for_stock and self.is_opening == "No" and \
 				item.item_code in stock_items and item.item_tax_amount:
 					# Post reverse entry for Stock-Received-But-Not-Billed if it is booked in Purchase Receipt
-					negative_expense_booked_in_pi = None
 					if item.purchase_receipt:
-						negative_expense_booked_in_pi = frappe.db.sql("""select name from `tabGL Entry`
+						negative_expense_booked_in_pr = frappe.db.sql("""select name from `tabGL Entry`
 							where voucher_type='Purchase Receipt' and voucher_no=%s and account=%s""",
 							(item.purchase_receipt, expenses_included_in_valuation))
 
-					if not negative_expense_booked_in_pi:
-						gl_entries.append(
-							self.get_gl_dict({
-								"account": stock_received_but_not_billed,
-								"against": self.supplier,
-								"debit": flt(item.item_tax_amount, self.precision("item_tax_amount", item)),
-								"remarks": self.remarks or "Accounting Entry for Stock"
-							})
-						)
+						if not negative_expense_booked_in_pr:
+							gl_entries.append(
+								self.get_gl_dict({
+									"account": stock_received_but_not_billed,
+									"against": self.supplier,
+									"debit": flt(item.item_tax_amount, self.precision("item_tax_amount", item)),
+									"remarks": self.remarks or "Accounting Entry for Stock"
+								})
+							)
 
-						negative_expense_to_be_booked += flt(item.item_tax_amount, self.precision("item_tax_amount", item))
+							negative_expense_to_be_booked += flt(item.item_tax_amount, self.precision("item_tax_amount", item))
 
 		if self.is_opening == "No" and negative_expense_to_be_booked and valuation_tax:
 			# credit valuation tax amount in "Expenses Included In Valuation"
@@ -421,7 +420,7 @@ class PurchaseInvoice(BuyingController):
 		if self.bill_no:
 			if cint(frappe.db.get_single_value("Accounts Settings", "check_supplier_invoice_uniqueness")):
 				pi = frappe.db.exists("Purchase Invoice", {"bill_no": self.bill_no,
-					"fiscal_year": self.fiscal_year, "name": ("!=", self.name)})
+					"fiscal_year": self.fiscal_year, "name": ("!=", self.name), "docstatus": ("<", 2)})
 				if pi:
 					frappe.throw("Supplier Invoice No exists in Purchase Invoice {0}".format(pi))
 
